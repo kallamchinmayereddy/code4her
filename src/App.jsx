@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import { MapPin, Route, ShieldCheck } from 'lucide-react';
+import { calculateRouteSafety } from './safetyAnalyzer';
 
-const LOCATIONIQ_TOKEN = import.meta.env.VITE_LOCATIONIQ_TOKEN; // Replace with actual LocationIQ token
+const LOCATIONIQ_TOKEN = 'pk.38eee99f84bae8c8257ace1eab5cf5c2'; // Replace with actual LocationIQ token
 const DEFAULT_CENTER = [80.50, 16.46];
 const DEFAULT_ZOOM = 12;
 
@@ -126,8 +127,15 @@ export default function App() {
         });
       }
 
+      const routeColor =
+        route.safetyColor === 'green'
+          ? '#22c55e'
+          : route.safetyColor === 'yellow'
+          ? '#eab308'
+          : '#ef4444';
+
       const paint = {
-        'line-color': isActive ? '#10b981' : '#64748b',
+        'line-color': isActive ? '#10b981' : routeColor,
         'line-width': isActive ? 6 : 3,
         'line-opacity': isActive ? 1 : 0.5,
       };
@@ -202,13 +210,23 @@ export default function App() {
         return;
       }
 
-      setRoutes(
-        data.routes.slice(0, 3).map((route) => ({
-          duration: route.duration,
-          distance: route.distance,
-          geometry: route.geometry,
-        })),
+      const scoredRoutes = await Promise.all(
+        data.routes.slice(0, 3).map(async (route) => {
+          const safety = await calculateRouteSafety(route);
+          const score = safety.routeSafetyScore ?? 0;
+          const color = score >= 0.75 ? 'green' : score >= 0.5 ? 'yellow' : 'red';
+          return {
+            duration: route.duration,
+            distance: route.distance,
+            geometry: route.geometry,
+            safetyScore: score,
+            safetyColor: color,
+            segmentScores: safety.segmentScores,
+          };
+        }),
       );
+
+      setRoutes(scoredRoutes);
       setActiveRoute(0);
     } catch (err) {
       console.error(err);
@@ -307,8 +325,11 @@ export default function App() {
                         {buildSafetyBadge(idx)}
                       </span>
                     </div>
-                    <div className="mt-2 text-xs text-slate-300">
-                      {Math.round(route.distance)} meters
+                    <div className="mt-1 flex items-center justify-between text-xs text-slate-300">
+                      <span>{Math.round(route.distance)} meters</span>
+                      <span className="font-semibold" style={{ color: route.safetyColor || '#fff' }}>
+                        Safety: {route.safetyScore?.toFixed(2) ?? 'N/A'}
+                      </span>
                     </div>
                   </button>
                 );
