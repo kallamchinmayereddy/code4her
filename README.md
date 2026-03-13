@@ -1,4 +1,3 @@
-Gemini said
 🛡️ SafeRoute AI: Safety-First Navigation System
 📌 Project Overview
 SafeRoute AI is a navigation enhancement system designed for individuals traveling alone or in unfamiliar areas. While traditional GPS apps like Google Maps or Waze prioritize the fastest or shortest path, SafeRoute AI prioritizes the safest path.
