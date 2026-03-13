@@ -24,10 +24,21 @@ function formatDuration(minutes) {
 }
 
 function buildSafetyBadge(index) {
-  // Mock logic for safety badge (could be replaced with real scoring later)
   if (index === 0) return 'Most Direct';
   if (index === 1) return '90% Well-Lit';
   return 'Safe Option';
+}
+
+function getRouteMessage(route, isFastest) {
+  if (route.safetyScore > 0.8) {
+    return '🛡️ Recommended: This path is comparatively safer with 90%+ street lighting.';
+  }
+
+  if (isFastest) {
+    return '⚡ Most Direct: Shorter travel time but passes through less-lit areas.';
+  }
+
+  return '⚠️ Balanced route: moderate safety and travel time.';
 }
 
 export default function App() {
@@ -174,13 +185,20 @@ export default function App() {
       const coords = activeFeature.geometry.coordinates;
       const mid = coords[Math.floor(coords.length / 2)];
       const duration = activeFeature.duration;
+      const message = activeFeature.message || getRouteMessage(activeFeature, activeFeature.isFastest);
 
       if (popupRef.current) {
         popupRef.current.remove();
       }
       popupRef.current = new mapboxgl.Popup({ closeButton: false, closeOnClick: false })
         .setLngLat(mid)
-        .setHTML(`<div class="text-sm font-semibold">${formatDuration(duration / 60)}</div>`)
+        .setHTML(`
+<div style="background:#0f172a; color:#e2e8f0; padding:10px; border-radius:12px; width:220px; font-family:system-ui, sans-serif;">
+  <div style="font-weight:700; font-size:14px; margin-bottom:4px;">${formatDuration(duration / 60)}</div>
+  <div style="font-size:12px; margin-bottom:6px;">Safety Rating: <strong>${Math.round((activeFeature.safetyScore || 0) * 100)}%</strong></div>
+  <div style="font-size:12px; color:#9ca3af;">${message}</div>
+</div>
+`)
         .addTo(map);
     }
   }, [routes, activeRoute]);
@@ -210,7 +228,7 @@ export default function App() {
         return;
       }
 
-      const scoredRoutes = await Promise.all(
+      let scoredRoutes = await Promise.all(
         data.routes.slice(0, 3).map(async (route) => {
           const safety = await calculateRouteSafety(route);
           const score = safety.routeSafetyScore ?? 0;
@@ -226,6 +244,22 @@ export default function App() {
         }),
       );
 
+      const fastestIndex = scoredRoutes.reduce(
+        (best, route, idx) => (route.duration < scoredRoutes[best].duration ? idx : best),
+        0,
+      );
+      const safestIndex = scoredRoutes.reduce(
+        (best, route, idx) => (route.safetyScore > scoredRoutes[best].safetyScore ? idx : best),
+        0,
+      );
+
+      scoredRoutes = scoredRoutes.map((route, idx) => ({
+        ...route,
+        isFastest: idx === fastestIndex,
+        isSafest: idx === safestIndex,
+        message: getRouteMessage(route, idx === fastestIndex),
+      }));
+
       setRoutes(scoredRoutes);
       setActiveRoute(0);
     } catch (err) {
@@ -238,6 +272,13 @@ export default function App() {
 
   const handleSelectRoute = (index) => {
     setActiveRoute(index);
+
+    const route = routes[index];
+    if (!route?.geometry?.coordinates?.length || !mapRef.current) return;
+
+    const bounds = new mapboxgl.LngLatBounds();
+    route.geometry.coordinates.forEach((coord) => bounds.extend(coord));
+    mapRef.current.fitBounds(bounds, { padding: 80, duration: 600 });
   };
 
   return (
@@ -318,19 +359,26 @@ export default function App() {
                     }
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-semibold text-slate-100">
-                        {formatDuration(durationMin)}
-                      </span>
-                      <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-slate-200">
-                        {buildSafetyBadge(idx)}
-                      </span>
+                      <div>
+                        <div className="text-sm font-semibold text-slate-100">{formatDuration(durationMin)}</div>
+                        <div className="text-[11px] text-slate-400">{route.message}</div>
+                      </div>
+                      <div className="flex gap-2">
+                        {route.isSafest ? (
+                          <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-[10px] font-bold text-emerald-300">
+                            Safest
+                          </span>
+                        ) : null}
+                        <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${
+                          route.safetyColor === 'green' ? 'bg-emerald-500/20 text-emerald-300' :
+                          route.safetyColor === 'yellow' ? 'bg-amber-500/20 text-amber-300' :
+                          'bg-rose-500/20 text-rose-300'
+                        }`}>
+                          {Math.round((route.safetyScore || 0) * 100)}% Safety
+                        </span>
+                      </div>
                     </div>
-                    <div className="mt-1 flex items-center justify-between text-xs text-slate-300">
-                      <span>{Math.round(route.distance)} meters</span>
-                      <span className="font-semibold" style={{ color: route.safetyColor || '#fff' }}>
-                        Safety: {route.safetyScore?.toFixed(2) ?? 'N/A'}
-                      </span>
-                    </div>
+                    <div className="mt-1 text-xs text-slate-300">{route.distance ? Math.round(route.distance) : 0} meters</div>
                   </button>
                 );
               })}
